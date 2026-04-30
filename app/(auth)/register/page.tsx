@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { supabase } from "@/lib/supabase";
 
-export default function Register() {
+function RegisterContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const defaultRole = searchParams.get("role") === "doctor" ? "doctor" : "patient";
@@ -19,30 +19,35 @@ export default function Register() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
 
+  const [success, setSuccess] = useState("");
+
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError("");
+    setSuccess("");
 
     try {
       const { data, error: authError } = await supabase.auth.signUp({
         email,
         password,
+        options: {
+          data: {
+            full_name: name,
+            role: role
+          }
+        }
       });
 
       if (authError) throw authError;
 
       if (data.user) {
-        // Create profile
-        const { error: profileError } = await supabase
-          .from('profiles')
-          .insert([
-            { id: data.user.id, full_name: name, email, role }
-          ]);
-
-        if (profileError) throw profileError;
-        
-        router.push(`/${role}/dashboard`);
+        // If email confirmation is ON, Supabase returns user but no session
+        if (!data.session) {
+          setSuccess("Registration successful! Please check your email to confirm your account before logging in.");
+        } else {
+          router.push(`/${role}/dashboard`);
+        }
       }
     } catch (err: any) {
       setError(err.message || "Failed to register");
@@ -74,39 +79,54 @@ export default function Register() {
           </button>
         </div>
 
-        <form onSubmit={handleRegister} className="space-y-4">
-          <Input 
-            label="Full Name" 
-            type="text" 
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required 
-            placeholder={role === "doctor" ? "Dr. John Doe" : "John Doe"}
-          />
-          <Input 
-            label="Email Address" 
-            type="email" 
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required 
-            placeholder="Enter your email"
-          />
-          <Input 
-            label="Password" 
-            type="password" 
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required 
-            placeholder="Create a password"
-            minLength={6}
-          />
-          
-          {error && <div className="p-3 bg-red-50 text-red-600 text-sm rounded-xl">{error}</div>}
+        {success ? (
+          <div className="text-center py-6">
+            <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-bold text-slate-900 mb-2">Check your email</h3>
+            <p className="text-slate-500 mb-6">{success}</p>
+            <Link href={`/login?role=${role}`}>
+              <Button className="w-full">Go to Login</Button>
+            </Link>
+          </div>
+        ) : (
+          <form onSubmit={handleRegister} className="space-y-4">
+            <Input 
+              label="Full Name" 
+              type="text" 
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required 
+              placeholder={role === "doctor" ? "Dr. John Doe" : "John Doe"}
+            />
+            <Input 
+              label="Email Address" 
+              type="email" 
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required 
+              placeholder="Enter your email"
+            />
+            <Input 
+              label="Password" 
+              type="password" 
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required 
+              placeholder="Create a password"
+              minLength={6}
+            />
+            
+            {error && <div className="p-3 bg-red-50 text-red-600 text-sm rounded-xl">{error}</div>}
 
-          <Button type="submit" className="w-full" isLoading={isLoading}>
-            Register
-          </Button>
-        </form>
+            <Button type="submit" className="w-full" isLoading={isLoading}>
+              Register
+            </Button>
+          </form>
+        )}
 
         <p className="mt-6 text-center text-sm text-slate-500">
           Already have an account?{" "}
@@ -116,5 +136,13 @@ export default function Register() {
         </p>
       </div>
     </div>
+  );
+}
+
+export default function Register() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
+      <RegisterContent />
+    </Suspense>
   );
 }
