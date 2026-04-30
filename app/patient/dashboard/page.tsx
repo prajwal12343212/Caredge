@@ -589,7 +589,20 @@ export default function PatientDashboard() {
                           {event.type === 'treatment' ? (
                             <div>
                               <h3 className="text-xl font-extrabold text-slate-900 mb-1">{event.diagnosis}</h3>
-                              <p className="text-sm font-semibold text-primary mb-4">Consultation with Dr. {event.profiles?.full_name}</p>
+                              <p className="text-sm font-semibold text-primary mb-2">Consultation with Dr. {event.profiles?.full_name}</p>
+                              {event.doctor_profile && (
+                                <div className="flex flex-wrap gap-2 mb-4">
+                                  <span className="text-xs font-medium bg-slate-100 text-slate-600 px-2 py-1 rounded">
+                                    {event.doctor_profile.specialization || "General"}
+                                  </span>
+                                  <span className="text-xs font-medium bg-slate-100 text-slate-600 px-2 py-1 rounded">
+                                    {event.doctor_profile.hospital_name || "Independent Clinic"}
+                                  </span>
+                                  <span className="text-xs font-medium bg-emerald-50 text-emerald-600 px-2 py-1 rounded flex items-center gap-1">
+                                    <ShieldCheck className="w-3 h-3" /> Verified
+                                  </span>
+                                </div>
+                              )}
                               <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 mb-3">
                                 <span className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Prescription</span>
                                 <p className="text-slate-800 font-medium">{event.prescription}</p>

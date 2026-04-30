@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import toast from "react-hot-toast";
 import { 
   Activity, User, LogOut, KeyRound, 
-  FileText, Clock, PenTool, Search, LayoutDashboard, History, Heart, ShieldCheck
+  FileText, Clock, PenTool, Search, LayoutDashboard, History, Heart, ShieldCheck, Upload, Plus
 } from "lucide-react";
 
 export default function DoctorDashboard() {
@@ -24,6 +24,12 @@ export default function DoctorDashboard() {
   const [patientProfile, setPatientProfile] = useState<any>(null);
   const [doctorLogs, setDoctorLogs] = useState<any[]>([]);
   const [securityData, setSecurityData] = useState<any>(null);
+  const [doctorProfile, setDoctorProfile] = useState<any>(null);
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [profileForm, setProfileForm] = useState<any>({});
+  const [languagesInput, setLanguagesInput] = useState("");
+  const [specializationInput, setSpecializationInput] = useState("");
+  const [specializations, setSpecializations] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState("portal");
   const [isLoading, setIsLoading] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState<string>("");
@@ -122,6 +128,7 @@ export default function DoctorDashboard() {
     setProfile(profileData);
     fetchDoctorLogs(session.user.id);
     fetchSecurityData(session.user.id);
+    fetchDoctorProfile(session.user.id);
   };
 
   const fetchSecurityData = async (doctorId: string) => {
@@ -139,6 +146,21 @@ export default function DoctorDashboard() {
       const res = await fetch(`/api/audit?doctorId=${doctorId}`);
       const data = await res.json();
       if (data.logs) setDoctorLogs(data.logs);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const fetchDoctorProfile = async (doctorId: string) => {
+    try {
+      const res = await fetch(`/api/doctor/profile?doctorId=${doctorId}`);
+      const data = await res.json();
+      if (data.profile) {
+        setDoctorProfile(data.profile);
+        setProfileForm(data.profile);
+        setLanguagesInput(data.profile.languages_spoken?.join(", ") || "");
+        setSpecializations(data.profile.specialization ? data.profile.specialization.split(",").map((s: string) => s.trim()).filter(Boolean) : []);
+      }
     } catch (err) {
       console.error(err);
     }
@@ -245,6 +267,62 @@ export default function DoctorDashboard() {
     }
   };
 
+  const handleProfileSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    const toastId = toast.loading("Saving profile...");
+    
+    try {
+      const res = await fetch("/api/doctor/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          doctor_id: user.id,
+          ...profileForm,
+          languages_spoken: languagesInput.split(",").map(s => s.trim()).filter(Boolean),
+          specialization: specializations.join(", ")
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+
+      setDoctorProfile(data.profile);
+      setIsEditingProfile(false);
+      toast.success("Profile updated!", { id: toastId });
+    } catch (err: any) {
+      toast.error(err.message, { id: toastId });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || !e.target.files[0]) return;
+    const file = e.target.files[0];
+    const toastId = toast.loading("Uploading photo...");
+
+    try {
+      const fileExt = file.name.split('.').pop();
+      const filePath = `${user.id}/profile-${Math.random()}.${fileExt}`;
+      
+      const { error: uploadError } = await supabase.storage
+        .from('doctor-profiles')
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('doctor-profiles')
+        .getPublicUrl(filePath);
+
+      setProfileForm({ ...profileForm, profile_photo_url: publicUrl });
+      toast.success("Photo uploaded!", { id: toastId });
+    } catch (err) {
+      toast.error("Upload failed", { id: toastId });
+    }
+  };
+
   const handleAddTreatment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isExpired) return toast.error("Session expired");
@@ -306,11 +384,22 @@ export default function DoctorDashboard() {
         </div>
         
         <div className="p-4">
-          <div className="flex items-center gap-3 p-3 mb-6 bg-slate-50 rounded-2xl border border-slate-100">
-            <div className="w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center text-accent">
-              <User className="w-5 h-5" />
+          <div 
+            onClick={() => setActiveTab("profile")}
+            className={`flex items-center gap-3 p-3 mb-6 rounded-2xl border cursor-pointer transition-all ${
+              activeTab === "profile" 
+                ? "bg-primary/5 border-primary/20 shadow-sm" 
+                : "bg-slate-50 border-slate-100 hover:bg-slate-100"
+            }`}
+          >
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center overflow-hidden ${doctorProfile?.profile_photo_url ? 'bg-slate-100' : 'bg-accent/10 text-accent'}`}>
+              {doctorProfile?.profile_photo_url ? (
+                <img src={doctorProfile.profile_photo_url} alt="Profile" className="w-full h-full object-cover" />
+              ) : (
+                <User className="w-5 h-5" />
+              )}
             </div>
-            <div className="overflow-hidden">
+            <div className="overflow-hidden flex-1">
               <p className="text-sm font-bold text-slate-900 truncate">Dr. {profile.full_name}</p>
               <p className="text-xs text-slate-500">Medical Professional</p>
             </div>
@@ -372,37 +461,86 @@ export default function DoctorDashboard() {
             {activeTab === "portal" && (
               <motion.div key="portal-tab" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                 {!activeSession ? (
-                  <div className="max-w-md mx-auto mt-20">
-                    <div className="bg-white p-10 rounded-3xl shadow-soft border border-slate-200 text-center relative overflow-hidden">
-                      <div className="absolute top-0 left-0 w-full h-2 bg-gradient-brand"></div>
-                      
-                      <div className="w-20 h-20 bg-primary/5 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-inner border border-primary/10">
-                        <KeyRound className="w-10 h-10 text-primary" />
+                  <div className="space-y-8">
+                    <div className="mb-4">
+                      <h2 className="text-2xl font-extrabold text-slate-900">Dashboard Overview</h2>
+                      <p className="text-slate-500 mt-1">Welcome back, Dr. {profile?.full_name}. Here's your summary.</p>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                        <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600 mb-4">
+                          <User className="w-5 h-5" />
+                        </div>
+                        <h3 className="text-2xl font-bold text-slate-900">
+                          {new Set(doctorLogs.filter(l => l.action === 'TREATMENT_ADDED').map(l => l.patient?.id)).size}
+                        </h3>
+                        <p className="text-sm font-semibold text-slate-500 uppercase tracking-wider mt-1 text-[10px]">Patients Treated</p>
                       </div>
                       
-                      <h2 className="text-3xl font-extrabold text-slate-900 mb-2">Access Portal</h2>
-                      <p className="text-slate-500 mb-8 font-medium flex items-center justify-center gap-2">
-                        <ShieldCheck className="w-4 h-4 text-primary" /> End-to-End Encrypted Login
-                      </p>
-                      
-                      <form onSubmit={validateToken} className="space-y-5">
-                        <div className="relative">
-                          <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
-                            <Search className="h-5 w-5 text-slate-400" />
-                          </div>
-                          <input 
-                            type="text"
-                            value={tokenInput}
-                            onChange={(e) => setTokenInput(e.target.value)}
-                            placeholder="Paste E2EE token link..."
-                            required
-                            className="w-full pl-12 pr-4 py-4 rounded-2xl border-2 border-slate-100 bg-slate-50 text-slate-900 font-mono text-xs text-center focus:outline-none focus:border-primary focus:bg-white focus:ring-4 focus:ring-primary/10 transition-all"
-                          />
+                      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                        <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600 mb-4">
+                          <Activity className="w-5 h-5" />
                         </div>
-                        <Button type="submit" className="w-full py-4 text-lg shadow-glow hover:shadow-lg transition-all rounded-2xl bg-gradient-brand" isLoading={isLoading}>
-                          Connect Securely
-                        </Button>
-                      </form>
+                        <h3 className="text-2xl font-bold text-slate-900">
+                          {doctorLogs.filter(l => l.action === 'TREATMENT_ADDED').length}
+                        </h3>
+                        <p className="text-sm font-semibold text-slate-500 uppercase tracking-wider mt-1 text-[10px]">Consultations</p>
+                      </div>
+                      
+                      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                        <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center text-purple-600 mb-4">
+                          <History className="w-5 h-5" />
+                        </div>
+                        <h3 className="text-2xl font-bold text-slate-900">
+                          {doctorLogs.filter(l => new Date(l.created_at).toDateString() === new Date().toDateString()).length}
+                        </h3>
+                        <p className="text-sm font-semibold text-slate-500 uppercase tracking-wider mt-1 text-[10px]">Today's Activity</p>
+                      </div>
+
+                      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                        <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center text-amber-600 mb-4">
+                          <ShieldCheck className="w-5 h-5" />
+                        </div>
+                        <h3 className="text-lg font-bold text-slate-900 truncate">
+                          {doctorProfile?.specialization || "General"}
+                        </h3>
+                        <p className="text-sm font-semibold text-slate-500 uppercase tracking-wider mt-1 text-[10px]">Specialization</p>
+                      </div>
+                    </div>
+
+                    <div className="max-w-md mx-auto mt-12">
+                      <div className="bg-white p-10 rounded-3xl shadow-soft border border-slate-200 text-center relative overflow-hidden">
+                        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-brand"></div>
+                        
+                        <div className="w-20 h-20 bg-primary/5 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-inner border border-primary/10">
+                          <KeyRound className="w-10 h-10 text-primary" />
+                        </div>
+                        
+                        <h2 className="text-3xl font-extrabold text-slate-900 mb-2">Access Portal</h2>
+                        <p className="text-slate-500 mb-8 font-medium flex items-center justify-center gap-2">
+                          <ShieldCheck className="w-4 h-4 text-primary" /> Secure Access Login
+                        </p>
+                        
+                        <form onSubmit={validateToken} className="space-y-5">
+                          <div className="relative">
+                            <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
+                              <Search className="h-5 w-5 text-slate-400" />
+                            </div>
+                            <input 
+                              type="text"
+                              value={tokenInput}
+                              onChange={(e) => setTokenInput(e.target.value)}
+                              placeholder="Paste access token..."
+                              required
+                              className="w-full pl-12 pr-4 py-4 rounded-2xl border-2 border-slate-100 bg-slate-50 text-slate-900 font-mono text-xs text-center focus:outline-none focus:border-primary focus:bg-white focus:ring-4 focus:ring-primary/10 transition-all"
+                            />
+                          </div>
+                          <Button type="submit" className="w-full py-4 text-lg shadow-glow hover:shadow-lg transition-all rounded-2xl bg-gradient-brand" isLoading={isLoading}>
+                            Connect Securely
+                          </Button>
+                        </form>
+                      </div>
                     </div>
                   </div>
                 ) : (
@@ -708,6 +846,258 @@ export default function DoctorDashboard() {
                         );
                       })}
                     </div>
+                  )}
+                </div>
+              </motion.div>
+            )}
+
+            {activeTab === "profile" && (
+              <motion.div key="profile-tab" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+                <div className="flex justify-between items-end mb-8">
+                  <div>
+                    <h2 className="text-2xl font-extrabold text-slate-900">Professional Profile</h2>
+                    <p className="text-slate-500 mt-1">Manage your medical identity and credentials.</p>
+                  </div>
+                  {!isEditingProfile && (
+                    <Button onClick={() => setIsEditingProfile(true)} className="bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 hover:text-primary">
+                      Edit Profile
+                    </Button>
+                  )}
+                </div>
+
+                <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+                  {!isEditingProfile ? (
+                    <div className="p-8">
+                      {doctorProfile ? (
+                        <div className="grid md:grid-cols-3 gap-8">
+                          <div className="md:col-span-1 border-r border-slate-100 pr-8">
+                            <div className="text-center">
+                              <div className="w-32 h-32 mx-auto bg-slate-100 rounded-full flex items-center justify-center overflow-hidden mb-4 border-4 border-white shadow-sm">
+                                {doctorProfile.profile_photo_url ? (
+                                  <img src={doctorProfile.profile_photo_url} alt="Profile" className="w-full h-full object-cover" />
+                                ) : (
+                                  <User className="w-12 h-12 text-slate-300" />
+                                )}
+                              </div>
+                              <h3 className="text-xl font-bold text-slate-900">Dr. {profile?.full_name}</h3>
+                              <p className="text-primary font-semibold text-sm mb-2">{doctorProfile.specialization || "General Physician"}</p>
+                              <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full text-xs font-bold">
+                                <ShieldCheck className="w-3.5 h-3.5" /> Verified Medical Professional
+                              </div>
+                            </div>
+
+                            <div className="mt-8 space-y-4">
+                              <div>
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Experience</p>
+                                <p className="text-sm font-semibold text-slate-800">{doctorProfile.experience_years || "Not specified"}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Registration No.</p>
+                                <p className="text-sm font-mono text-slate-800">{doctorProfile.medical_license || "Not specified"}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Languages</p>
+                                <p className="text-sm font-semibold text-slate-800">{doctorProfile.languages_spoken?.join(", ") || "Not specified"}</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="md:col-span-2 space-y-8">
+                            <section>
+                              <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wider mb-3 pb-2 border-b border-slate-100">About & Qualifications</h4>
+                              {doctorProfile.bio && <p className="text-slate-600 text-sm mb-4 leading-relaxed">{doctorProfile.bio}</p>}
+                              
+                              <div className="grid sm:grid-cols-2 gap-6">
+                                <div>
+                                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Primary Qualification</p>
+                                  <p className="text-sm font-semibold text-slate-800">{doctorProfile.medical_qualification || "Not specified"}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Additional Degrees</p>
+                                  <p className="text-sm font-semibold text-slate-800">{doctorProfile.degrees?.join(", ") || "None"}</p>
+                                </div>
+                              </div>
+                            </section>
+
+                            <section>
+                              <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wider mb-3 pb-2 border-b border-slate-100">Clinic / Hospital Details</h4>
+                              <div className="grid sm:grid-cols-2 gap-6">
+                                <div>
+                                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Hospital Name</p>
+                                  <p className="text-sm font-semibold text-slate-800">{doctorProfile.hospital_name || "Not specified"}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Working Hours</p>
+                                  <p className="text-sm font-semibold text-slate-800">{doctorProfile.working_hours || "Not specified"}</p>
+                                </div>
+                                <div className="sm:col-span-2">
+                                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Address</p>
+                                  <p className="text-sm font-semibold text-slate-800">{doctorProfile.hospital_address || "Not specified"}</p>
+                                </div>
+                              </div>
+                            </section>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-center py-12">
+                          <User className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+                          <h3 className="text-lg font-bold text-slate-900 mb-2">Profile Not Set Up</h3>
+                          <p className="text-slate-500 mb-6 max-w-md mx-auto">You haven't completed your professional profile yet. A complete profile helps build trust with patients.</p>
+                          <Button onClick={() => setIsEditingProfile(true)} className="bg-primary text-white">Create Profile</Button>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <form onSubmit={handleProfileSave} className="p-8">
+                      <div className="space-y-8 max-w-3xl mx-auto">
+                        
+                        {/* Photo Upload Section */}
+                        <div className="flex items-center gap-6 pb-6 border-b border-slate-100">
+                          <div className="w-24 h-24 rounded-full bg-slate-100 flex items-center justify-center overflow-hidden border-2 border-slate-200">
+                            {profileForm.profile_photo_url ? (
+                              <img src={profileForm.profile_photo_url} alt="Profile" className="w-full h-full object-cover" />
+                            ) : (
+                              <User className="w-10 h-10 text-slate-300" />
+                            )}
+                          </div>
+                          <div>
+                            <h4 className="font-bold text-slate-900 mb-1">Profile Photo</h4>
+                            <p className="text-xs text-slate-500 mb-3">Upload a professional image to build trust with your patients.</p>
+                            <input type="file" id="photo-upload" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
+                            <label htmlFor="photo-upload" className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-semibold text-slate-700 hover:bg-slate-100 transition-colors">
+                              <Upload className="w-4 h-4" /> Choose Image
+                            </label>
+                          </div>
+                        </div>
+
+                        {/* Professional Identity */}
+                        <div className="space-y-5">
+                          <h4 className="font-bold text-slate-900 border-b border-slate-100 pb-2">Professional Identity</h4>
+                          
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="col-span-2">
+                              <label className="block text-xs font-bold uppercase text-slate-500 mb-1.5">Specializations</label>
+                              <div className="flex gap-2 mb-2">
+                                <select className="flex-1 px-3 py-2 rounded-lg border border-slate-200 focus:border-primary outline-none"
+                                  value={specializationInput} onChange={(e) => setSpecializationInput(e.target.value)}>
+                                  <option value="">Select Speciality</option>
+                                  <option value="Cardiologist">Cardiologist</option>
+                                  <option value="Neurologist">Neurologist</option>
+                                  <option value="Dermatologist">Dermatologist</option>
+                                  <option value="Pediatrician">Pediatrician</option>
+                                  <option value="Orthopedic">Orthopedic</option>
+                                  <option value="General Physician">General Physician</option>
+                                  <option value="Other">Other (Type below)</option>
+                                </select>
+                                <Button type="button" onClick={() => {
+                                  if (specializationInput && !specializations.includes(specializationInput)) {
+                                    setSpecializations([...specializations, specializationInput]);
+                                    setSpecializationInput("");
+                                  }
+                                }} className="bg-primary text-white px-3"><Plus className="w-5 h-5"/></Button>
+                              </div>
+                              {specializationInput === "Other" && (
+                                <div className="flex gap-2 mb-2 mt-2">
+                                  <input type="text" id="custom-spec" className="flex-1 px-3 py-2 rounded-lg border border-slate-200 focus:border-primary outline-none" placeholder="Enter custom speciality" />
+                                  <Button type="button" onClick={() => {
+                                    const val = (document.getElementById("custom-spec") as HTMLInputElement).value;
+                                    if (val && !specializations.includes(val)) {
+                                      setSpecializations([...specializations, val]);
+                                      (document.getElementById("custom-spec") as HTMLInputElement).value = "";
+                                    }
+                                  }} className="bg-primary text-white px-3"><Plus className="w-5 h-5"/></Button>
+                                </div>
+                              )}
+                              <div className="flex flex-wrap gap-2 mt-2">
+                                {specializations.map((spec, idx) => (
+                                  <span key={idx} className="inline-flex items-center gap-1 bg-primary/10 text-primary px-3 py-1 rounded-full text-sm font-semibold">
+                                    {spec}
+                                    <button type="button" onClick={() => setSpecializations(specializations.filter((_, i) => i !== idx))} className="hover:text-red-500 ml-1">&times;</button>
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold uppercase text-slate-500 mb-1.5">Registration No.</label>
+                              <input type="text" className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:border-primary focus:ring-1 focus:ring-primary outline-none" 
+                                value={profileForm.medical_license || ""} onChange={(e) => setProfileForm({...profileForm, medical_license: e.target.value})} placeholder="E.g., MCI-12345" />
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold uppercase text-slate-500 mb-1.5">Primary Qualification</label>
+                              <input type="text" className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:border-primary focus:ring-1 focus:ring-primary outline-none" 
+                                value={profileForm.medical_qualification || ""} onChange={(e) => setProfileForm({...profileForm, medical_qualification: e.target.value})} placeholder="E.g., MBBS, MD" />
+                            </div>
+
+                            <div className="col-span-2">
+                              <label className="block text-xs font-bold uppercase text-slate-500 mb-1.5">Experience</label>
+                              <select className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+                                value={profileForm.experience_years || ""} onChange={(e) => setProfileForm({...profileForm, experience_years: e.target.value})}>
+                                <option value="">Select</option>
+                                <option value="New to field">New to field</option>
+                                <option value="1-3 years">1-3 years</option>
+                                <option value="3-5 years">3-5 years</option>
+                                <option value="5-10 years">5-10 years</option>
+                                <option value="10+ years">10+ years</option>
+                              </select>
+                            </div>
+
+                            <div className="col-span-2">
+                              <label className="block text-xs font-bold uppercase text-slate-500 mb-1.5">Professional Bio</label>
+                              <textarea className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:border-primary focus:ring-1 focus:ring-primary outline-none resize-none" rows={3}
+                                value={profileForm.bio || ""} onChange={(e) => setProfileForm({...profileForm, bio: e.target.value})} placeholder="Brief overview of your expertise..."></textarea>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Clinic & Contact Details */}
+                        <div className="space-y-5">
+                          <h4 className="font-bold text-slate-900 border-b border-slate-100 pb-2">Clinic & Contact Details</h4>
+
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-xs font-bold uppercase text-slate-500 mb-1.5">Hospital / Clinic Name</label>
+                              <input type="text" className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:border-primary focus:ring-1 focus:ring-primary outline-none" 
+                                value={profileForm.hospital_name || ""} onChange={(e) => setProfileForm({...profileForm, hospital_name: e.target.value})} placeholder="E.g., City General Hospital" />
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold uppercase text-slate-500 mb-1.5">Working Hours</label>
+                              <select className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+                                value={profileForm.working_hours || ""} onChange={(e) => setProfileForm({...profileForm, working_hours: e.target.value})}>
+                                <option value="">Select Working Hours</option>
+                                <option value="Morning Shift (8 AM - 2 PM)">Morning Shift (8 AM - 2 PM)</option>
+                                <option value="Evening Shift (2 PM - 8 PM)">Evening Shift (2 PM - 8 PM)</option>
+                                <option value="Night Shift (8 PM - 8 AM)">Night Shift (8 PM - 8 AM)</option>
+                                <option value="Full Day (9 AM - 5 PM)">Full Day (9 AM - 5 PM)</option>
+                                <option value="Flexible / On Call">Flexible / On Call</option>
+                              </select>
+                            </div>
+
+                            <div className="col-span-2">
+                              <label className="block text-xs font-bold uppercase text-slate-500 mb-1.5">Address</label>
+                              <input type="text" className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:border-primary focus:ring-1 focus:ring-primary outline-none" 
+                                value={profileForm.hospital_address || ""} onChange={(e) => setProfileForm({...profileForm, hospital_address: e.target.value})} placeholder="Full address" />
+                            </div>
+                            
+                            <div className="col-span-2">
+                              <label className="block text-xs font-bold uppercase text-slate-500 mb-1.5">Languages Spoken (comma separated)</label>
+                              <input type="text" className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:border-primary focus:ring-1 focus:ring-primary outline-none" 
+                                value={languagesInput} 
+                                onChange={(e) => setLanguagesInput(e.target.value)} 
+                                placeholder="E.g., English, Spanish, Hindi" />
+                            </div>
+                          </div>
+                        </div>
+
+                      </div>
+
+                      <div className="mt-8 flex justify-end gap-3 pt-6 border-t border-slate-100">
+                        <Button type="button" variant="secondary" onClick={() => {setIsEditingProfile(false); setProfileForm(doctorProfile || {});}}>Cancel</Button>
+                        <Button type="submit" isLoading={isSubmitting} className="bg-primary text-white">Save Professional Profile</Button>
+                      </div>
+                    </form>
                   )}
                 </div>
               </motion.div>

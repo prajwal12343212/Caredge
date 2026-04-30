@@ -46,6 +46,19 @@ function RegisterContent() {
         if (!data.session) {
           setSuccess("Registration successful! Please check your email to confirm your account before logging in.");
         } else {
+          // Fallback: Manually insert the profile if the database trigger fails or is missing.
+          // The RLS policy allows users to insert their own profile.
+          const { error: profileError } = await supabase.from('profiles').insert({
+            id: data.user.id,
+            role: role,
+            full_name: name,
+            email: email
+          });
+          
+          if (profileError && profileError.code !== '23505') { // Ignore unique violation if trigger succeeded
+            console.error("Profile insertion fallback error:", profileError);
+          }
+
           router.push(`/${role}/dashboard`);
         }
       }
