@@ -1,8 +1,10 @@
 import { supabaseServer } from "./supabase-server";
+import { evaluateAITThreat } from "./ai-security";
 
 export type AuditAction = 
   | "PATIENT_LOGIN" 
   | "DOCTOR_LOGIN" 
+  | "FAILED_LOGIN"
   | "RECORD_UPLOADED" 
   | "RECORD_DELETED"
   | "TOKEN_GENERATED"
@@ -15,7 +17,8 @@ export type AuditAction =
   | "INVALID_TOKEN"
   | "TOKEN_USED"
   | "TOKEN_REPLAY_REJECTED"
-  | "PROFILE_UPDATED";
+  | "PROFILE_UPDATED"
+  | "SCREENSHOT_ATTEMPT";
 
 interface AuditLogParams {
   userId: string;
@@ -58,6 +61,16 @@ export async function logAuditEvent(params: AuditLogParams) {
 
     if (error) {
       console.error("Failed to insert audit log:", error);
+    } else {
+      // Trigger AI Threat Detection Engine
+      await evaluateAITThreat({
+        userId: params.userId,
+        userRole: params.userRole,
+        action: params.action,
+        ipAddress,
+        description: params.description,
+        patientId: params.patientId
+      });
     }
   } catch (err) {
     console.error("Audit logging error:", err);

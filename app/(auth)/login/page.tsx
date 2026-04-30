@@ -61,6 +61,31 @@ function LoginContent() {
       router.push(`/${role}/dashboard`);
     } catch (err: any) {
       setError(err.message || "Failed to login");
+      
+      // Try to find the user by email to log the failed attempt for AI Threat Detection
+      try {
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('id, role')
+          .eq('email', email)
+          .single();
+          
+        if (profileData) {
+          await fetch('/api/audit/log', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: profileData.id,
+              userRole: profileData.role,
+              action: 'FAILED_LOGIN',
+              description: `Failed login attempt using invalid credentials.`
+            })
+          });
+        }
+      } catch (logErr) {
+        // Ignore log errors
+      }
+      
     } finally {
       setIsLoading(false);
     }

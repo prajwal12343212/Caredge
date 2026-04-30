@@ -45,7 +45,41 @@ export default function PatientDashboard() {
 
   useEffect(() => {
     checkUser();
-  }, []);
+    
+    // Screenshot Detection Logic
+    const handleScreenshot = async (e: KeyboardEvent) => {
+      // Common screenshot keys: PrintScreen (44), or Cmd+Shift+4 (Mac)
+      if (e.key === 'PrintScreen' || (e.metaKey && e.shiftKey && (e.key === '4' || e.key === '3'))) {
+        if (user?.id) {
+          await fetch('/api/audit/log', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: user.id,
+              userRole: 'patient',
+              action: 'SCREENSHOT_ATTEMPT',
+              description: 'Screenshot capture detected.'
+            })
+          });
+          toast.error("Security Policy: Screenshots are monitored for privacy.");
+        }
+      }
+    };
+
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === 'hidden' && user?.id) {
+        // Often triggered when screen capture tools open
+      }
+    };
+
+    window.addEventListener('keyup', handleScreenshot);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('keyup', handleScreenshot);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [user?.id]);
 
   const checkUser = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -658,6 +692,187 @@ export default function PatientDashboard() {
                       ))}
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Grant Access Tab */}
+              {activeTab === "access" && (
+                <div className="max-w-2xl">
+                  <div className="mb-8">
+                    <h2 className="text-2xl font-extrabold text-slate-900">Grant Access</h2>
+                    <p className="text-slate-500 mt-1">Generate a time-limited token with an embedded encryption key wrapper.</p>
+                  </div>
+
+                  <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-soft">
+                    <div className="flex flex-col sm:flex-row items-end gap-4 mb-8">
+                      <div className="flex-1 w-full">
+                        <Input 
+                          label="Session Duration (Hours)" 
+                          type="number" 
+                          min="1" max="72"
+                          value={duration}
+                          onChange={(e) => setDuration(parseInt(e.target.value))}
+                          className="bg-slate-50"
+                        />
+                      </div>
+                      <Button onClick={generateToken} className="w-full sm:w-auto px-8 py-2.5 bg-gradient-brand text-white font-semibold rounded-xl shadow-glow hover:shadow-lg transition-all">
+                        Generate Secure Token
+                      </Button>
+                    </div>
+
+                    {newToken && (
+                      <motion.div 
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="p-8 bg-slate-50 border border-slate-200 rounded-3xl flex flex-col items-center text-center"
+                      >
+                        <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mb-4 shadow-inner">
+                          <ShieldCheck className="w-8 h-8" />
+                        </div>
+                        <h3 className="font-extrabold text-xl text-slate-900 mb-2">Secure E2EE Link Created</h3>
+                        <p className="text-sm text-slate-600 mb-8 max-w-sm">
+                          Share this with your doctor. It contains an <strong>embedded symmetric encryption key</strong> that allows the doctor to decrypt your records only during this session.
+                        </p>
+                        
+                        <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 mb-6">
+                          <QRCodeSVG value={newToken} size={180} />
+                        </div>
+                        
+                        <div className="w-full relative group">
+                          <div className="w-full bg-white p-4 rounded-xl border border-slate-200 font-mono text-xs break-all shadow-inner text-slate-700 font-medium">
+                            {newToken}
+                          </div>
+                          <button 
+                            onClick={() => {
+                              navigator.clipboard.writeText(newToken);
+                              toast.success("Copied to clipboard!");
+                            }}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 px-4 py-2 bg-slate-100 text-slate-700 text-xs font-bold rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-slate-200"
+                          >
+                            Copy
+                          </button>
+                        </div>
+                      </motion.div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Sessions Tab */}
+              {activeTab === "sessions" && (
+                <div>
+                  <div className="mb-8">
+                    <h2 className="text-2xl font-extrabold text-slate-900">Active Sessions</h2>
+                    <p className="text-slate-500 mt-1">Manage and revoke doctor access.</p>
+                  </div>
+
+                  <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse min-w-[500px]">
+                        <thead className="bg-slate-50 border-b border-slate-200">
+                          <tr className="text-xs uppercase tracking-widest text-slate-500 font-bold">
+                            <th className="p-5">Generated</th>
+                            <th className="p-5">Expires</th>
+                            <th className="p-5">Status</th>
+                            <th className="p-5 text-right">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {tokens.map(token => {
+                            const isExpired = new Date() > new Date(token.expires_at);
+                            const isUsed = !!token.used_at;
+                            const isRevoked = token.revoked;
+                            const isActive = !isRevoked && !isExpired;
+                            
+                            let statusLabel = "READY";
+                            let statusClass = "bg-emerald-50 text-emerald-700 border-emerald-200";
+                            if (isRevoked) { statusLabel = "REVOKED"; statusClass = "bg-slate-100 text-slate-600 border-slate-200"; }
+                            else if (isExpired) { statusLabel = "EXPIRED"; statusClass = "bg-amber-50 text-amber-700 border-amber-200"; }
+                            else if (isUsed) { statusLabel = "USED"; statusClass = "bg-blue-50 text-blue-700 border-blue-200"; }
+
+                            return (
+                              <tr key={token.id} className="hover:bg-slate-50/50 transition-colors">
+                                <td className="p-5 text-sm font-semibold text-slate-900 whitespace-nowrap">{new Date(token.created_at).toLocaleString()}</td>
+                                <td className="p-5 text-sm text-slate-500 font-medium whitespace-nowrap">{new Date(token.expires_at).toLocaleString()}</td>
+                                <td className="p-5">
+                                  <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-full border whitespace-nowrap ${statusClass}`}>
+                                    {isActive && !isUsed && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>}
+                                    {statusLabel}
+                                  </span>
+                                </td>
+                                <td className="p-5 text-right">
+                                  {isActive && !isUsed && (
+                                    <button onClick={() => revokeToken(token.id)} className="text-red-600 hover:text-red-800 text-sm font-bold bg-red-50 hover:bg-red-100 px-4 py-2 rounded-lg transition-colors">
+                                      Revoke
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Transparency Tab */}
+              {activeTab === "transparency" && (
+                <div>
+                  <div className="mb-8">
+                    <h2 className="text-2xl font-extrabold text-slate-900">Access Transparency</h2>
+                    <p className="text-slate-500 mt-1">A complete audit trail of all activity regarding your records.</p>
+                  </div>
+
+                  <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 overflow-hidden">
+                    {auditLogs.length === 0 ? (
+                      <div className="text-center py-12">
+                        <p className="text-slate-500 font-medium">No activity recorded yet.</p>
+                      </div>
+                    ) : (
+                      <div className="relative border-l-2 border-slate-100 ml-4 space-y-8 pb-4">
+                        {auditLogs.map((log) => {
+                          const isSuccess = !['UNAUTHORIZED_ACCESS', 'INVALID_TOKEN'].includes(log.action);
+                          const isWarning = ['TOKEN_REVOKED', 'SESSION_EXPIRED'].includes(log.action);
+                          const isDanger = ['UNAUTHORIZED_ACCESS', 'INVALID_TOKEN'].includes(log.action);
+                          
+                          let badgeClass = "bg-slate-100 text-slate-700";
+                          if (isDanger) badgeClass = "bg-red-100 text-red-700";
+                          else if (isWarning) badgeClass = "bg-amber-100 text-amber-700";
+                          else if (isSuccess && log.action.includes('LOGIN')) badgeClass = "bg-blue-100 text-blue-700";
+                          else if (isSuccess) badgeClass = "bg-emerald-100 text-emerald-700";
+
+                          return (
+                            <div key={log.id} className="relative pl-8">
+                              <span className={`absolute -left-[11px] top-1.5 w-5 h-5 rounded-full border-4 border-white ${
+                                isDanger ? "bg-red-500" : isWarning ? "bg-amber-500" : "bg-primary"
+                              }`}></span>
+                              
+                              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 hover:shadow-soft transition-all">
+                                <div className="flex justify-between items-start mb-2">
+                                  <div>
+                                    <span className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${badgeClass}`}>
+                                      {log.action.replace(/_/g, ' ')}
+                                    </span>
+                                  </div>
+                                  <span className="text-xs font-bold text-slate-400">
+                                    {new Date(log.created_at).toLocaleString()}
+                                  </span>
+                                </div>
+                                
+                                <p className="text-slate-800 font-medium text-sm mt-3">{log.metadata?.description}</p>
+                                
+                                <div className="mt-3 flex gap-4 text-xs font-medium text-slate-500 bg-white px-3 py-2 rounded-lg border border-slate-100 inline-flex flex-wrap">
+                                  <span><strong className="text-slate-700">Actor:</strong> {log.actor?.full_name || log.actor_id?.split('-')[0]} ({log.actor_role})</span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 

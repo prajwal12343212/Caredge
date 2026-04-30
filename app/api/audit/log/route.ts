@@ -3,7 +3,17 @@ import { logAuditEvent, AuditAction } from '@/lib/audit';
 
 export async function POST(request: Request) {
   try {
-    const { userId, userRole, action, description } = await request.json();
+    const { 
+      userId, 
+      userRole, 
+      action, 
+      description, 
+      patientId, 
+      doctorId, 
+      tokenId, 
+      targetType, 
+      targetId 
+    } = await request.json();
 
     if (!userId || !userRole || !action) {
       return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
@@ -13,8 +23,12 @@ export async function POST(request: Request) {
       userId,
       userRole,
       action: action as AuditAction,
-      targetType: 'system',
-      description: description || 'User logged in',
+      targetType: targetType || 'system',
+      targetId,
+      description: description || 'System event logged',
+      patientId,
+      doctorId,
+      tokenId,
       req: request
     });
 

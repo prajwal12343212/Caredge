@@ -23,6 +23,7 @@ export default function DoctorDashboard() {
   const [patientTreatments, setPatientTreatments] = useState<any[]>([]);
   const [patientProfile, setPatientProfile] = useState<any>(null);
   const [doctorLogs, setDoctorLogs] = useState<any[]>([]);
+  const [securityData, setSecurityData] = useState<any>(null);
   const [activeTab, setActiveTab] = useState("portal");
   const [isLoading, setIsLoading] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState<string>("");
@@ -37,7 +38,39 @@ export default function DoctorDashboard() {
 
   useEffect(() => {
     checkUser();
-  }, []);
+    
+    // Screenshot Detection Logic for Doctors
+    const handleScreenshot = async (e: KeyboardEvent) => {
+      if (e.key === 'PrintScreen' || (e.metaKey && e.shiftKey && (e.key === '4' || e.key === '3'))) {
+        if (user?.id && activeSession?.token?.patient_id) {
+          await fetch('/api/audit/log', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: user.id,
+              userRole: 'doctor',
+              action: 'SCREENSHOT_ATTEMPT',
+              patientId: activeSession.token.patient_id,
+              description: `Doctor ${profile?.full_name || user.id} attempted to take a screenshot of patient data.`
+            })
+          });
+          toast.error("Security Policy: Screenshots of patient records are strictly prohibited and recorded.", { duration: 5000 });
+        }
+      }
+    };
+
+    window.addEventListener('keyup', handleScreenshot);
+
+    // Poll security data every 10 seconds for real-time alerts
+    const interval = setInterval(() => {
+      if (user?.id) fetchSecurityData(user.id);
+    }, 10000);
+    
+    return () => {
+      window.removeEventListener('keyup', handleScreenshot);
+      clearInterval(interval);
+    };
+  }, [user?.id, activeSession?.token?.patient_id]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -88,6 +121,17 @@ export default function DoctorDashboard() {
     }
     setProfile(profileData);
     fetchDoctorLogs(session.user.id);
+    fetchSecurityData(session.user.id);
+  };
+
+  const fetchSecurityData = async (doctorId: string) => {
+    try {
+      const res = await fetch(`/api/security/incidents?userId=${doctorId}`);
+      const data = await res.json();
+      setSecurityData(data);
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const fetchDoctorLogs = async (doctorId: string) => {
@@ -313,6 +357,18 @@ export default function DoctorDashboard() {
       <main className="flex-1 h-screen overflow-y-auto relative bg-slate-50/50">
         <div className="max-w-6xl mx-auto p-6 lg:p-10">
           <AnimatePresence mode="wait">
+            {securityData?.incidents && securityData.incidents.length > 0 && securityData.incidents[0].status === 'active' && (
+              <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-4 shadow-sm mb-6">
+                <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 flex-shrink-0">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-amber-800 text-sm">Security Feedback: {securityData.incidents[0].threat_type.replace(/_/g, ' ')}</h3>
+                  <p className="text-amber-700 text-sm mt-1">{securityData.incidents[0].description}</p>
+                </div>
+              </motion.div>
+            )}
+
             {activeTab === "portal" && (
               <motion.div key="portal-tab" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                 {!activeSession ? (
